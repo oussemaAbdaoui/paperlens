@@ -1,0 +1,3 @@
+{"id": "q001", "question": "What attention mechanism does the Transformer rely on?", "ground_truth": "Scaled dot-product self-attention with multiple heads.", "relevant_paper_ids": [1], "relevant_chunk_keys": ["1706.03762::Methods::p3"], "domain": "NLP"}
+{"id": "q002", "question": "What dataset is used to pretrain BERT?", "ground_truth": "BooksCorpus and English Wikipedia.", "relevant_paper_ids": [2], "relevant_chunk_keys": ["1810.04805::Methods::p3"], "domain": "NLP"}
+{"id": "q003", "question": "What backbone does ResNet introduce to ease training of deep networks?", "ground_truth": "Residual (skip) connections.", "relevant_paper_ids": [3], "relevant_chunk_keys": ["1512.03385::Introduction::p1"], "domain": "CV"}

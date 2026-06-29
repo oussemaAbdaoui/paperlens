@@ -1,0 +1,11 @@
+.git
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+data/
+*.db
+*.index
+.env
+PaperLens-Specification-Book.docx

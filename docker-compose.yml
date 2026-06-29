@@ -1,0 +1,34 @@
+# Reproducible single-command deployment (NFR §6, spec §7).
+#   docker-compose up --build
+# Brings up the FastAPI backend (:8000) and the Streamlit UI (:8501) sharing a
+# persistent data volume (SQLite + PDFs + FAISS index).
+
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - PAPERLENS_LLM_MODEL=${PAPERLENS_LLM_MODEL:-gpt-4o}
+      - PAPERLENS_EMBEDDING_BACKEND=${PAPERLENS_EMBEDDING_BACKEND:-bge}
+      - PAPERLENS_SEED=42
+      - PAPERLENS_DATA_DIR=/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - paperlens_data:/data
+      - huggingface_cache:/root/.cache/huggingface
+
+  frontend:
+    build: .
+    command: streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      - PAPERLENS_API_URL=http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+volumes:
+  paperlens_data:
+  huggingface_cache:
