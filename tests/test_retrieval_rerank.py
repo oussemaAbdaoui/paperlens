@@ -135,3 +135,20 @@ def test_rerank_handles_empty_and_small_pools(stub_reranker):
     assert reranking.rerank("q", [], lambda c: c, top_k=5) == []
     out = reranking.rerank("q", ["a", "x x", "x"], lambda c: c, top_k=5)
     assert out == [("x x", 2.0), ("x", 1.0), ("a", 0.0)]
+
+
+def test_filtered_scope_is_not_starved_by_a_larger_unfiltered_pool(db, store):
+    # 250 near-identical chunks in collection A outrank everything for this
+    # query; collection B holds 3 weaker matches. A query scoped to B must still
+    # find them, even though none is in the global top-200 cosine pool.
+    a = db.create_collection("A")
+    b = db.create_collection("B")
+    add_paper(db, store, ["transformer attention heads"] * 250, collection_id=a, title="A")
+    _, b_ids = add_paper(
+        db, store,
+        [f"transformer attention variant{i} unrelated words here" for i in range(3)],
+        collection_id=b, title="B",
+    )
+
+    res = retrieve("transformer attention heads", SearchFilters(collection_id=b), db, store)
+    assert sorted(r.chunk_id for r in res) == sorted(b_ids)

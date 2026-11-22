@@ -73,21 +73,29 @@ def retrieve(
     # 1 + 2: embed and search a candidate pool.
     qvec = embed_query(query)
     pool_size = max(_MIN_CANDIDATES, s.retrieve_top_k * _CANDIDATE_MULTIPLIER)
-    hits = store.search(qvec, k=pool_size)  # [(vector_idx, score)]
-    if not hits:
-        return []
+    while True:
+        hits = store.search(qvec, k=pool_size)  # [(vector_idx, score)]
+        if not hits:
+            return []
 
-    rows = db.chunks_by_vector_idx([vid for vid, _ in hits])
+        rows = db.chunks_by_vector_idx([vid for vid, _ in hits])
 
-    # 3: filter, then keep the top-20 by cosine (hits are already score-sorted).
-    candidates: list[RetrievedChunk] = []
-    for vid, score in hits:
-        row = rows.get(vid)
-        if row is None or not _passes_filters(row, filters):
-            continue
-        candidates.append(_to_retrieved(row, score))
-        if len(candidates) >= s.retrieve_top_k:
+        # 3: filter, then keep the top-20 by cosine (hits are already score-sorted).
+        candidates: list[RetrievedChunk] = []
+        for vid, score in hits:
+            row = rows.get(vid)
+            if row is None or not _passes_filters(row, filters):
+                continue
+            candidates.append(_to_retrieved(row, score))
+            if len(candidates) >= s.retrieve_top_k:
+                break
+
+        # A selective filter can reject the whole pool even though matching
+        # chunks exist further down; widen the search until the pool is full
+        # or the index is exhausted.
+        if len(candidates) >= s.retrieve_top_k or pool_size >= store.size:
             break
+        pool_size = min(store.size, pool_size * 4)
 
     if not candidates:
         return []
