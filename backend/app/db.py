@@ -168,7 +168,7 @@ class Database:
     def find_duplicate(self, *, filename: str, doi: Optional[str]) -> Optional[sqlite3.Row]:
         """Duplicate detection by DOI first, then filename (US-01)."""
         if doi:
-            row = self._one("SELECT * FROM papers WHERE doi = ? LIMIT 1", (doi,))
+            row = self._one("SELECT * FROM papers WHERE doi = ? COLLATE NOCASE LIMIT 1", (doi,))
             if row:
                 return row
         return self._one("SELECT * FROM papers WHERE filename = ? LIMIT 1", (filename,))

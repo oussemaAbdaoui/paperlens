@@ -85,3 +85,11 @@ def test_upload_overwrite_replaces_paper_and_its_vectors(client, settings_env):
 def test_fake_pdf_with_pdf_extension_rejected(client):
     r = client.post("/papers/upload", files={"file": ("x.pdf", b"not a pdf", "application/pdf")})
     assert r.status_code == 415
+
+
+def test_doi_match_is_case_insensitive(db):
+    # DOIs are case-insensitive; the PDF text and Crossref/user input often
+    # differ in case for the same paper.
+    a = db.insert_paper(filename="a.pdf", path="/a", collection_id=None)
+    db.update_metadata(a, {"doi": "10.1145/ABC.Def-12"})
+    assert db.find_duplicate(filename="other.pdf", doi="10.1145/abc.def-12")["id"] == a
