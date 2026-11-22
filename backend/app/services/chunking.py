@@ -107,80 +107,121 @@ def chunk_document(doc: ParsedDocument) -> list[ChunkDraft]:
     return drafts
 
 
-def _pack_section(section: str, paras: list[tuple[int, str]], min_tok: int, max_tok: int) -> list[ChunkDraft]:
-    drafts: list[ChunkDraft] = []
-    cur_text: list[str] = []
-    cur_tokens = 0
-    cur_page = paras[0][0] if paras else 1
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
-    def emit():
-        nonlocal cur_text, cur_tokens
-        if cur_text:
-            text = "\n\n".join(cur_text).strip()
-            drafts.append(ChunkDraft(page=cur_page, section=section, text=text, token_count=count_tokens(text)))
-            cur_text = []
-            cur_tokens = 0
+
+@dataclass
+class _Atom:
+    """Smallest unit the packer moves: a sentence, or a window of a run-on one."""
+
+    page: int
+    text: str
+    joiner: str  # separator placed before this atom when it follows another one
+
+
+def _join(atoms: list[_Atom]) -> str:
+    if not atoms:
+        return ""
+    return atoms[0].text + "".join(a.joiner + a.text for a in atoms[1:])
+
+
+def _tokens(atoms: list[_Atom]) -> int:
+    return count_tokens(_join(atoms))
+
+
+def _pack_section(section: str, paras: list[tuple[int, str]], min_tok: int, max_tok: int) -> list[ChunkDraft]:
+    """Pack one section's paragraphs into chunks of ``min_tok``..``max_tok`` tokens.
+
+    Paragraph boundaries are preferred: a paragraph is split (at sentence
+    boundaries, or at word boundaries for run-on text with no punctuation) only
+    when it cannot be placed whole. Atoms are capped below ``max_tok - min_tok``
+    tokens, so whenever the next atom does not fit, the current chunk already
+    holds at least ``min_tok`` tokens; only the last chunk of a section can come
+    out short, and it is then merged into or rebalanced with its predecessor.
+    """
+    atom_cap = max(max_tok - min_tok, max_tok // 2, 1)
+    chunks: list[list[_Atom]] = []
+    cur: list[_Atom] = []
 
     for page, para in paras:
-        ptok = count_tokens(para)
+        para_atoms = _atomize(page, para, atom_cap)
+        # Start a fresh chunk at this paragraph boundary when the paragraph
+        # fits in a chunk of its own but not in the current one.
+        if (
+            cur
+            and _tokens(cur + para_atoms) > max_tok
+            and _tokens(para_atoms) <= max_tok
+            and _tokens(cur) >= min_tok
+        ):
+            chunks.append(cur)
+            cur = []
+        for atom in para_atoms:
+            if cur and _tokens(cur + [atom]) > max_tok:
+                chunks.append(cur)
+                cur = []
+            cur.append(atom)
+    if cur:
+        chunks.append(cur)
 
-        # A single oversized paragraph: hard-split on sentences to respect max.
-        if ptok > max_tok:
-            emit()
-            for piece in _split_oversized(para, max_tok):
-                drafts.append(
-                    ChunkDraft(page=page, section=section, text=piece, token_count=count_tokens(piece))
-                )
-            cur_page = page
-            continue
+    # A short trailing chunk: merge it back if that stays within max, otherwise
+    # move the split point so both chunks satisfy the bounds. Never crosses the
+    # section, since everything here belongs to ``section``.
+    if len(chunks) >= 2 and _tokens(chunks[-1]) < min_tok:
+        prev, last = chunks[-2], chunks[-1]
+        if _tokens(prev + last) <= max_tok:
+            chunks[-2:] = [prev + last]
+        else:
+            split = _balanced_split(prev + last, min_tok, max_tok)
+            if split is not None:
+                chunks[-2:] = split
 
-        if cur_tokens + ptok > max_tok and cur_tokens >= min_tok:
-            emit()
-            cur_page = page
-
-        if not cur_text:
-            cur_page = page
-        cur_text.append(para)
-        cur_tokens += ptok
-
-    emit()
-
-    # Merge a too-small trailing chunk into the previous one when possible,
-    # without exceeding max — but only within this same section.
-    return _merge_small(drafts, min_tok, max_tok)
+    drafts = []
+    for atoms in chunks:
+        text = _join(atoms)
+        drafts.append(ChunkDraft(page=atoms[0].page, section=section, text=text, token_count=count_tokens(text)))
+    return drafts
 
 
-def _split_oversized(para: str, max_tok: int) -> list[str]:
-    sentences = re.split(r"(?<=[.!?])\s+", para)
-    pieces: list[str] = []
+def _atomize(page: int, para: str, cap: int) -> list[_Atom]:
+    atoms: list[_Atom] = []
+    for i, sent in enumerate(s for s in _SENTENCE_SPLIT.split(para) if s):
+        joiner = "\n\n" if i == 0 else " "
+        pieces = [sent] if count_tokens(sent) <= cap else _word_windows(sent, cap)
+        for j, piece in enumerate(pieces):
+            atoms.append(_Atom(page=page, text=piece, joiner=joiner if j == 0 else " "))
+    return atoms
+
+
+def _word_windows(text: str, cap: int) -> list[str]:
+    """Hard-split text with no usable sentence boundary into <= cap-token windows."""
+    words: list[str] = []
+    for w in text.split():
+        if count_tokens(w) <= cap:
+            words.append(w)
+        else:  # a single "word" over the cap (e.g. a long URL): split by characters
+            words.extend(w[k : k + cap] for k in range(0, len(w), cap))
+    windows: list[str] = []
     buf: list[str] = []
-    tok = 0
-    for sent in sentences:
-        st = count_tokens(sent)
-        if tok + st > max_tok and buf:
-            pieces.append(" ".join(buf))
-            buf, tok = [], 0
-        buf.append(sent)
-        tok += st
+    for w in words:
+        if buf and count_tokens(" ".join(buf + [w])) > cap:
+            windows.append(" ".join(buf))
+            buf = []
+        buf.append(w)
     if buf:
-        pieces.append(" ".join(buf))
-    return pieces
+        windows.append(" ".join(buf))
+    return windows
 
 
-def _merge_small(drafts: list[ChunkDraft], min_tok: int, max_tok: int) -> list[ChunkDraft]:
-    if len(drafts) < 2:
-        return drafts
-    out = drafts[:]
-    last = out[-1]
-    if last.token_count < min_tok:
-        prev = out[-2]
-        if prev.token_count + last.token_count <= max_tok:
-            merged_text = prev.text + "\n\n" + last.text
-            out[-2] = ChunkDraft(
-                page=prev.page,
-                section=prev.section,
-                text=merged_text,
-                token_count=count_tokens(merged_text),
-            )
-            out.pop()
-    return out
+def _balanced_split(atoms: list[_Atom], min_tok: int, max_tok: int) -> list[list[_Atom]] | None:
+    """Split ``atoms`` into two chunks that both satisfy the bounds, as evenly as
+    possible. Returns None if no atom boundary works."""
+    best = None
+    for k in range(1, len(atoms)):
+        left, right = _tokens(atoms[:k]), _tokens(atoms[k:])
+        if min_tok <= left <= max_tok and min_tok <= right <= max_tok:
+            gap = abs(left - right)
+            if best is None or gap < best[0]:
+                best = (gap, k)
+    if best is None:
+        return None
+    return [atoms[: best[1]], atoms[best[1] :]]
