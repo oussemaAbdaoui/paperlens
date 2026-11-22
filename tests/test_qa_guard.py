@@ -114,3 +114,23 @@ def test_qa_endpoint_with_filter_matching_nothing_skips_llm(client, monkeypatch)
 
     assert body["grounded"] is False and body["citations"] == [] and body["sources"] == []
     assert llm.calls == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        qa.NO_PASSAGES_MESSAGE,
+        f"'{qa.NO_PASSAGES_MESSAGE}'",
+        f"  \"{qa.NO_PASSAGES_MESSAGE}\"\n",
+    ],
+)
+def test_llm_refusal_is_not_reported_as_grounded(settings_env, monkeypatch, reply):
+    # Passages were retrieved but did not contain the answer, so the model
+    # followed rule 3 and refused. That must not be shown as a grounded answer
+    # backed by the retrieved passages as citations.
+    monkeypatch.setattr(qa, "_call_llm", RecordingLLM(reply))
+    resp = qa.answer_question("Unanswerable?", [_chunk(1), _chunk(2)])
+    assert resp.grounded is False
+    assert resp.answer == qa.NO_PASSAGES_MESSAGE
+    assert resp.citations == [] and resp.sources == []
+

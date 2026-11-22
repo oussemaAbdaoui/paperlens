@@ -79,6 +79,18 @@ def answer_question(question: str, chunks: list[RetrievedChunk], latency_ms: flo
 
     answer_text = _call_llm(s, SYSTEM_PROMPT, user_prompt)
 
+    # The model may itself conclude the excerpts do not answer the question
+    # (prompt rule 3). Report that as ungrounded, without attaching the
+    # retrieved passages as citations for a non-answer.
+    if _is_refusal(answer_text):
+        return QAResponse(
+            answer=NO_PASSAGES_MESSAGE,
+            citations=[],
+            sources=[],
+            grounded=False,
+            latency_ms=latency_ms,
+        )
+
     citations = [
         Citation(chunk_id=c.chunk_id, paper_id=c.paper_id, label=citation_label(c))
         for c in chunks
@@ -90,6 +102,10 @@ def answer_question(question: str, chunks: list[RetrievedChunk], latency_ms: flo
         grounded=True,
         latency_ms=latency_ms,
     )
+
+
+def _is_refusal(answer: str) -> bool:
+    return answer.strip().strip("'\"`").strip() == NO_PASSAGES_MESSAGE
 
 
 def _call_llm(settings, system: str, user: str) -> str:
