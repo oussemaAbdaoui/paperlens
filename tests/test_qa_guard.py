@@ -134,3 +134,8 @@ def test_llm_refusal_is_not_reported_as_grounded(settings_env, monkeypatch, repl
     assert resp.answer == qa.NO_PASSAGES_MESSAGE
     assert resp.citations == [] and resp.sources == []
 
+
+def test_whitespace_only_author_does_not_crash_citation(settings_env):
+    # Authors are user-editable (PATCH /papers/{id}); a blank entry must not
+    # make the /qa endpoint fail.
+    assert qa.citation_label(_chunk(1, authors=["  "])) == "(Unknown, 2021 — Paper 1, p. 1)"

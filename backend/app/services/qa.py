@@ -35,7 +35,8 @@ SYSTEM_PROMPT = (
 def _author_label(chunk: RetrievedChunk) -> str:
     if not chunk.authors:
         return "Unknown"
-    first = chunk.authors[0].split()[-1] if chunk.authors[0] else "Unknown"
+    names = chunk.authors[0].split()
+    first = names[-1] if names else "Unknown"
     return f"{first} et al." if len(chunk.authors) > 1 else first
 
 
