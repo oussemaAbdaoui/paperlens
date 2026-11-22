@@ -1,0 +1,15 @@
+# Lean dependency set for the offline test suite (used by CI).
+#
+# The tests run with PAPERLENS_EMBEDDING_BACKEND=hash and a stubbed LLM, so
+# torch, sentence-transformers, openai, streamlit and ragas are not needed.
+# Versions mirror requirements.txt.
+fastapi==0.111.0
+pydantic==2.7.4
+pydantic-settings==2.3.4
+python-multipart==0.0.9
+requests==2.32.3
+feedparser==6.0.11
+faiss-cpu==1.8.0
+numpy==1.26.4
+pytest==8.2.2
+httpx==0.27.0
